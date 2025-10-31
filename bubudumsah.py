@@ -49,10 +49,14 @@ def extract_first_image_url(html_content):
 def strip_html_and_divs(html):
     if html is None:
         html = ""
+    # Ganti tag penutup paragraf asli dengan dua newline
     processed_text = re.sub(r'</p>', r'\n\n', html, flags=re.IGNORECASE)
+    # Hapus semua tag img, div, dan tag HTML lainnya
     processed_text = re.sub(r'<img[^>]*>', '', processed_text)
     processed_text = re.sub(r'</?div[^>]*>', '', processed_text, flags=re.IGNORECASE)
-    processed_text = re.sub('<[^<]+?>', '', processed_text) 
+    # Hapus sisa tag HTML, tapi sisakan tag khusus (seperti <details>)
+    processed_text = re.sub(r'<[^>]*>', '', processed_text) 
+    # Normalisasi multiple newlines menjadi double newline
     processed_text = re.sub(r'\n{3,}', r'\n\n', processed_text).strip()
     return processed_text
 
@@ -88,8 +92,6 @@ def edit_content_placeholder(post_id, post_title, full_text_content):
     print(f"🔄 Melewati pengeditan konten 300 kata pertama AI untuk artikel ID: {post_id}.")
     content_after_replacements = replace_custom_words(full_text_content)
     cleaned_content = strip_html_and_divs(content_after_replacements)
-    # Mengembalikan konten yang dibersihkan, dan 300 kata pertama yang sudah diganti kata
-    # (untuk kebutuhan edit_title_placeholder yang sekarang tidak memerlukannya, tapi menjaga struktur)
     first_300_words = " ".join(content_after_replacements.split()[:300])
     return cleaned_content, first_300_words
 
@@ -154,11 +156,13 @@ def insert_details_tag(content_text, article_url=None, article_title=None):
         encoded_article_url = quote_plus(clean_article_url)
         encoded_article_title_for_display = article_title.replace('"', '&quot;')
 
-    details_tag_start = f'<details><summary><a href="https://lanjutbabdua.github.io/lanjut.html?url={encoded_article_url}#lanjut" rel="nofollow" target="_blank">Lanjut BAB 2: {encoded_article_title_for_display}</a></summary><h4>CHAPTER DUA</h4><div id="lanjut">\n'
-    details_tag_end = '\n</div></details>'
+    # Memastikan tidak ada \n\n yang memisahkan tag details
+    details_tag_start = f'<details><summary><a href="https://lanjutbabdua.github.io/lanjut.html?url={encoded_article_url}#lanjut" rel="nofollow" target="_blank">Lanjut BAB 2: {encoded_article_title_for_display}</a></summary><h4>CHAPTER DUA</h4><div id="lanjut">'
+    details_tag_end = '</div></details>'
     
     print(f"📝 Tag <details> akan disisipkan setelah paragraf ke-{paragraph_insert_index} (total {total_paragraphs} paragraf).")
-    return first_part + '\n\n' + details_tag_start + rest_part + details_tag_end
+    # Sisipkan tag details sebagai blok teks yang dipisahkan oleh \n\n
+    return first_part + '\n\n' + details_tag_start + '\n\n' + rest_part + '\n\n' + details_tag_end
 
 def add_more_tag_before_send(content_text):
     paragraphs = content_text.split('\n\n')
@@ -170,8 +174,9 @@ def add_more_tag_before_send(content_text):
     first_paragraph = paragraphs[0].strip()
     rest_of_content = "\n\n".join(paragraphs[1:]).strip()
     
-    # Sisipkan placeholder 
-    content_with_more_tag = first_paragraph + '\n\n\n\n' + rest_of_content # Mengganti placeholder dengan tag print("📝 Tag disisipkan setelah paragraf pertama.")
+    # Sisipkan tag sebagai blok paragraf yang dipisahkan \n\n
+    content_with_more_tag = first_paragraph + '\n\n\n\n' + rest_of_content
+    print("📝 Tag disisipkan setelah paragraf pertama.")
     return content_with_more_tag
 
 def publish_post_to_wordpress(wp_xmlrpc_url, blog_id, title, content_html, username, app_password, random_image_url=None, post_status='publish', tags=None):
@@ -192,7 +197,7 @@ def publish_post_to_wordpress(wp_xmlrpc_url, blog_id, title, content_html, usern
         
         post = WordPressPost()
         post.title = title
-        post.content = final_content_for_wp
+        post.content = final_content_for_wp # Konten sudah dalam bentuk HTML yang benar
         post.post_status = post_status
         post.slug = slugify(title)
 
@@ -212,7 +217,7 @@ def publish_post_to_wordpress(wp_xmlrpc_url, blog_id, title, content_html, usern
         if tags:
             print(f"Tags: {post.terms_names.get('post_tag')}")
         content_preview = post.content[:500] + '...' if len(post.content) > 500 else post.content
-        print(f"Content Preview (sebagian): {content_preview}")
+        print(f"Content Preview (sebagian): {content_preview.replace('\n', ' ')}")
         print("---------------------------------------\n")
 
         post_id = client.call(NewPost(post, blog_id=blog_id))
@@ -251,7 +256,7 @@ def fetch_raw_posts():
                     break
                 else:
                     raise Exception(f"Error: Gagal mengambil data dari WordPress REST API: {res.status_code} - {res.text}. "
-                                    f"Pastikan URL API Anda benar dan dapat diakses.")
+                                     f"Pastikan URL API Anda benar dan dapat diakses.")
             elif res.status_code != 200:
                 raise Exception(f"Error: Gagal mengambil data dari WordPress REST API: {res.status_code} - {res.text}. "
                                f"Pastikan URL API Anda benar dan dapat diakses.")
@@ -283,7 +288,7 @@ if __name__ == '__main__':
     print(f"🎯 Akan memposting ke WordPress TARGET via XML-RPC: {WP_TARGET_API_URL} dengan Blog ID: {WP_BLOG_ID}.")
     print("❌ Fitur Pengeditan Judul dan Konten (300 kata pertama) oleh Gemini AI **DINONAKTIFKAN** (menggunakan konten asli yang sudah diganti kata).")
     print("📝 Tag <details> akan disisipkan di dalam artikel di pertengahan total paragraf.")
-    print("📝 Tag akan disisipkan setelah paragraf pertama.")
+    print("📝 Tag akan disisipkan setelah paragraf pertama.") # Ubah output log
     print("🖼️ Mencoba menambahkan gambar acak di awal konten.")
     print(f"🏷️ Tag default yang akan ditambahkan: {', '.join(DEFAULT_TAGS)}")
     
@@ -332,17 +337,17 @@ if __name__ == '__main__':
                 print(f"🗓️ Tanggal untuk URL artikel: {date_path}")
 
                 content_no_anchors = remove_anchor_tags(original_content)
+                
+                # Fungsi ini seharusnya mengubah </p> menjadi \n\n
                 cleaned_content_before_gemini = strip_html_and_divs(content_no_anchors)
                 content_after_replacements_all = replace_custom_words(cleaned_content_before_gemini)
 
-                # Mengganti panggilan fungsi Gemini dengan placeholder/pembersihan kata
                 final_processed_content_text, edited_first_300_words_content = edit_content_placeholder(
                     original_id,
                     original_title, 
                     content_after_replacements_all 
                 )
                 
-                # Mengganti panggilan fungsi Gemini dengan placeholder/penggantian kata
                 final_edited_title = edit_title_placeholder(
                     original_title
                 )
@@ -358,46 +363,66 @@ if __name__ == '__main__':
                     article_title=final_edited_title
                 )
                 
-                # Panggil fungsi add_more_tag_before_send
                 final_content_with_more_tag_placeholder = add_more_tag_before_send(content_with_details_tag)
 
-                # Konversi newline ganda menjadi tag <p>
-                # Pastikan tag <details> tidak diubah menjadi <p> karena menggunakan newline ganda.
-                # Solusi: sementara kita biarkan, tapi perlu diingat bahwa XML-RPC mungkin tidak mendukung tag <details> sepenuhnya, 
-                # dan konversi ke <p> ini bisa merusak struktur. 
-                # Untuk aman: gunakan hanya satu newline untuk antar paragraf di output final_processed_content_text jika ingin format <p> otomatis. 
-                # Karena di strip_html_and_divs sudah diubah ke '\n\n', kita lanjutkan dengan asumsi ini akan diterjemahkan dengan baik oleh WP.
+                # ----------------------------------------------------------------
+                # 🚀 LOGIKA KONVERSI HTML YANG DIPERBAIKI (MENGATASI PEMISAHAN KARAKTER) 🚀
+                # ----------------------------------------------------------------
                 
-                # Mengganti '\n\n' menjadi penutup dan pembuka tag <p>, ini berfungsi sebagai konverter markdown
-                final_post_content_html = final_content_with_more_tag_placeholder.replace('\n\n', '</p><p>')
+                # 1. Memecah konten berdasarkan newline ganda (\n\n) menjadi array blok.
+                content_blocks = final_content_with_more_tag_placeholder.split('\n\n')
                 
-                # Hapus <p></p> kosong yang mungkin tersisa dari final_post_content_html = final_post_content_html.replace('<p></p>', '')
-                final_post_content_html = final_post_content_html.replace('', '</p><p>')
-                
-                # Tambahkan <p> awal jika belum ada
-                if not final_post_content_html.startswith('<p>'):
-                    final_post_content_html = '<p>' + final_post_content_html
-                
-                # Hapus <p> akhir yang mungkin tersisa
-                if final_post_content_html.endswith('<p>'):
-                    final_post_content_html = final_post_content_html[:-3]
+                final_html_parts = []
+                for block in content_blocks:
+                    block = block.strip()
+                    if not block:
+                        continue
+                        
+                    # Tag khusus yang seharusnya TIDAK dibungkus oleh <p> (termasuk tag details, more, dll.)
+                    # Kita cek jika blok sudah diawali atau diakhiri tag HTML atau merupakan tag khusus.
+                    if block.startswith('<') or block.endswith('>') or block.startswith('Similar wordpress.com site'):
+                        final_html_parts.append(block)
+                    else:
+                        # Ini adalah blok teks biasa, bungkus dengan <p>
+                        final_html_parts.append(f'<p>{block}</p>')
 
-                # Pastikan tag <details> dan </div> tidak tertutup oleh <p> atau </p> yang tidak perlu
+                # 2. Menggabungkan kembali bagian-bagian, dipisahkan oleh newline tunggal.
+                final_post_content_html = '\n'.join(final_html_parts)
+                
+                # 3. Pembersihan terakhir: memastikan tag khusus tidak terbungkus oleh tag <p> yang tersisa dari proses gabungan.
+                final_post_content_html = final_post_content_html.replace('</p>\n\n\n\n<p>', '\n\n')
+                final_post_content_html = final_post_content_html.replace('<p></p>', '')
+                final_post_content_html = final_post_content_html.replace('</p><details>', '</details><details>') # Perbaikan jika ada </p> yang menempel
+                final_post_content_html = final_post_content_html.replace('</details><p>', '</details>\n\n')
                 final_post_content_html = final_post_content_html.replace('<p><details>', '<details>')
                 final_post_content_html = final_post_content_html.replace('</details></p>', '</details>')
                 final_post_content_html = final_post_content_html.replace('</div></p>', '</div>')
                 final_post_content_html = final_post_content_html.replace('<p>Similar wordpress.com site', 'Similar wordpress.com site')
+                
+                # Hapus <p> atau </p> yang tersisa di awal/akhir
+                if final_post_content_html.startswith('<p>'):
+                    final_post_content_html = final_post_content_html[3:]
+                if final_post_content_html.endswith('</p>'):
+                    final_post_content_html = final_post_content_html[:-4]
+                    
+                # ----------------------------------------------------------------
+                # 🛑 LOGIKA KONVERSI HTML YANG DIPERBAIKI SELESAI 🛑
+                # ----------------------------------------------------------------
 
 
                 print("💡 Pratinjau Konten HTML Final (untuk cek tag):")
-                print(final_post_content_html[:500].replace('\n', ' ') + '...' if len(final_post_content_html) > 500 else final_post_content_html.replace('\n', ' '))
+                # Gunakan replace('\n', ' ') untuk pratinjau agar log tidak terlalu panjang
+                preview = final_post_content_html[:500]
+                if len(final_post_content_html) > 500:
+                    preview += '...'
+                print(preview.replace('\n', ' '))
                 print("-------------------------------------------------------")
 
                 published_result = publish_post_to_wordpress(
                     WP_TARGET_API_URL,
                     WP_BLOG_ID,
                     final_edited_title,
-                    final_post_content_html,
+                    final_post_content_html, # Mengirim konten HTML yang sudah diperbaiki
                     WP_USERNAME,
                     WP_APP_PASSWORD,
                     random_image_url=selected_random_image,
