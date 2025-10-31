@@ -1,0 +1,73 @@
+name: Bulk Publish WordPress Articles 🚀
+
+on:
+  # Mengubah dari 'schedule' harian menjadi hanya 'workflow_dispatch'.
+  # Ini memungkinkan Anda menjalankan proses BULK publish secara manual 
+  # melalui tab Actions. Hapus blok 'schedule' di bawah ini:
+  # schedule:
+  #   # Runs every day at 00:00 UTC (7:00 AM WIB)
+  #   - cron: '0 0 * * *'
+  workflow_dispatch: # Memungkinkan Anda menjalankan workflow ini secara manual dari tab Actions
+
+jobs:
+  publish_all_articles: # Mengganti nama job agar lebih spesifik
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: ⬇️ Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        # Penting: Checkout dengan token yang memiliki izin push
+        token: ${{ secrets.GITHUB_TOKEN }} 
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: 📦 Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Menghapus 'google-generativeai' karena tidak lagi digunakan.
+        pip install requests markdown python-wordpress-xmlrpc --upgrade
+
+    - name: 🖼️ Prepare Random Images List (if applicable)
+      run: |
+        if [ ! -f random_images.json ]; then
+          echo "[]" > random_images.json
+          echo "::warning::random_images.json not found. Creating an empty one. Add your image URLs there!"
+        fi
+        
+    - name: 📄 Ensure State File Exists
+      run: |
+        if [ ! -f artikel_terbit.json ]; then
+          echo "[]" > artikel_terbit.json
+          echo "::notice::artikel_terbit.json not found. Creating an empty one for the first run."
+        fi
+
+    - name: 🚀 Run Article Publisher Script (Bulk Mode)
+      env:
+        # MENGHAPUS SEMUA GEMINI API KEY karena fitur AI sudah dinonaktifkan
+        # GEMINI_API_KEY_CONTENT: ${{ secrets.GEMINI_API_KEY_CONTENT }} 
+        WP_USERNAME: ${{ secrets.WP_USERNAME }}
+        WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+      run: |
+        python bubudumsah.py # Pastikan nama file Python Anda benar
+
+    - name: 🔄 Commit and Push Updated Published State
+      # Ini akan memastikan file artikel_terbit.json disimpan setelah SEMUA artikel diterbitkan.
+      run: |
+        git config user.name "GitHub Actions Bot"
+        git config user.email "actions@github.com"
+        git add artikel_terbit.json
+        # Menggunakan pesan commit yang lebih mencerminkan bulk action
+        git commit -m "chore: Update artikel_terbit.json after bulk publishing" || true
+        git push || true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+
+    - name: ⬆️ Upload Updated Published Posts State (for debugging)
+      uses: actions/upload-artifact@v4
+      with:
+        name: artikel-terbit-state
+        path: artikel_terbit.json
