@@ -8,24 +8,21 @@ import re
 import markdown
 import unicodedata
 from urllib.parse import quote_plus
-
 from wordpress_xmlrpc import Client, WordPressPost
 from wordpress_xmlrpc.methods.posts import NewPost
 from wordpress_xmlrpc.methods.media import UploadFile
 
+# --- KONFIGURASI ---
 API_SOURCE_URL = "https://kisahbecek.com/wp-json/wp/v2/posts"
-WP_TARGET_API_URL = "https://bubudumsah.wordpress.com/xmlrpc.php"
-WP_BLOG_ID = "128925319" 
-
+WP_TARGET_API_URL = "https://wiraferita.wordpress.com/xmlrpc.php"
+WP_BLOG_ID = "128949820" 
 STATE_FILE = 'artikel_terbit.json'
 RANDOM_IMAGES_FILE = 'random_images.json'
-
 DEFAULT_TAGS = ["Cerita Dewasa", "Cerita Seks", "Cerita Sex", "Cerita Ngentot"]
-
 # Menghapus konfigurasi dan impor Gemini API
-
 WP_USERNAME = os.getenv('WP_USERNAME')
 WP_APP_PASSWORD = os.getenv('WP_APP_PASSWORD')
+
 if not WP_USERNAME or not WP_APP_PASSWORD:
     raise ValueError("WP_USERNAME dan WP_APP_PASSWORD environment variables not set for target WordPress. Please set them in GitHub Secrets.")
 
@@ -39,6 +36,8 @@ REPLACEMENT_MAP = {
     "mani": "kenikmatan",
     "sex": "bercinta"
 }
+
+# --- FUNGSI UTILITY ---
 
 def extract_first_image_url(html_content):
     match = re.search(r'<img[^>]+src="([^"]+)"', html_content, re.IGNORECASE)
@@ -164,19 +163,27 @@ def insert_details_tag(content_text, article_url=None, article_title=None):
     # Sisipkan tag details sebagai blok teks yang dipisahkan oleh \n\n
     return first_part + '\n\n' + details_tag_start + '\n\n' + rest_part + '\n\n' + details_tag_end
 
+# FUNGSI YANG DIMODIFIKASI: Mengganti tag dengan <!--more--> dan TIDAK menggunakan tanda **
 def add_more_tag_before_send(content_text):
     paragraphs = content_text.split('\n\n')
-    
-    if not paragraphs or not paragraphs[0].strip():
-        print("⚠️ Konten terlalu pendek atau paragraf pertama kosong. Tidak menyisipkan .")
-        return content_text
 
-    first_paragraph = paragraphs[0].strip()
-    rest_of_content = "\n\n".join(paragraphs[1:]).strip()
+    if not paragraphs or not paragraphs[0].strip():
+        print("⚠️ Konten terlalu pendek atau paragraf pertama kosong. Tidak menyisipkan <!--more-->.")
+        return content_text
     
-    # Sisipkan tag sebagai blok paragraf yang dipisahkan \n\n
-    content_with_more_tag = first_paragraph + '\n\n\n\n' + rest_of_content
-    print("📝 Tag disisipkan setelah paragraf pertama.")
+    # Menghapus duplikat newline ganda yang mungkin terjadi akibat split/join
+    cleaned_paragraphs = [p.strip() for p in paragraphs if p.strip()]
+
+    if not cleaned_paragraphs:
+        return content_text
+        
+    first_paragraph = cleaned_paragraphs[0]
+    rest_of_content = "\n\n".join(cleaned_paragraphs[1:]).strip()
+    
+    # Sisipkan string <!--more--> sebagai blok paragraf yang dipisahkan \n\n
+    content_with_more_tag = first_paragraph + '\n\n' + '<!--more-->' + '\n\n' + rest_of_content
+    
+    print("📝 String <!--more--> disisipkan setelah paragraf pertama.")
     return content_with_more_tag
 
 def publish_post_to_wordpress(wp_xmlrpc_url, blog_id, title, content_html, username, app_password, random_image_url=None, post_status='publish', tags=None):
@@ -224,7 +231,6 @@ def publish_post_to_wordpress(wp_xmlrpc_url, blog_id, title, content_html, usern
         
         print(f"✅ Artikel '{title}' berhasil diterbitkan ke WordPress via XML-RPC! Post ID: {post_id}")
         return {'id': post_id, 'URL': None}
-
     except Exception as e:
         print(f"❌ Terjadi kesalahan saat memposting ke WordPress via XML-RPC: {e}")
         if hasattr(e, 'faultCode') and hasattr(e, 'faultString'):
@@ -259,11 +265,13 @@ def fetch_raw_posts():
                                      f"Pastikan URL API Anda benar dan dapat diakses.")
             elif res.status_code != 200:
                 raise Exception(f"Error: Gagal mengambil data dari WordPress REST API: {res.status_code} - {res.text}. "
-                               f"Pastikan URL API Anda benar dan dapat diakses.")
+                                 f"Pastikan URL API Anda benar dan dapat diakses.")
+
             posts_batch = res.json()
             if not posts_batch:
                 print(f"Fetched empty batch on page {page}. Stopping fetch.")
                 break
+
             for post in posts_batch:
                 all_posts_data.append({
                     'id': post.get('id'),
@@ -280,15 +288,17 @@ def fetch_raw_posts():
         except requests.exceptions.RequestException as e:
             print(f"Network Error: Gagal terhubung ke WordPress API di halaman {page}: {e}. Cek koneksi atau URL.")
             break
+            
     return all_posts_data
 
+# --- FUNGSI UTAMA ---
 if __name__ == '__main__':
     print(f"[{datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] Starting WordPress to WordPress publishing process...")
     print(f"🚀 Mengambil artikel dari WordPress SUMBER: {API_SOURCE_URL}.")
     print(f"🎯 Akan memposting ke WordPress TARGET via XML-RPC: {WP_TARGET_API_URL} dengan Blog ID: {WP_BLOG_ID}.")
     print("❌ Fitur Pengeditan Judul dan Konten (300 kata pertama) oleh Gemini AI **DINONAKTIFKAN** (menggunakan konten asli yang sudah diganti kata).")
     print("📝 Tag <details> akan disisipkan di dalam artikel di pertengahan total paragraf.")
-    print("📝 Tag akan disisipkan setelah paragraf pertama.") # Ubah output log
+    print("📝 String **<!--more-->** (sebagai placeholder) akan disisipkan setelah paragraf pertama.")
     print("🖼️ Mencoba menambahkan gambar acak di awal konten.")
     print(f"🏷️ Tag default yang akan ditambahkan: {', '.join(DEFAULT_TAGS)}")
     
@@ -314,7 +324,6 @@ if __name__ == '__main__':
 
         # Urutkan berdasarkan tanggal (paling baru duluan)
         unpublished_posts.sort(key=lambda x: datetime.datetime.fromisoformat(x['date'].replace('Z', '+00:00')), reverse=True)
-
         
         # --- LOGIKA PENGAMBILAN SEMUA ARTIKEL DIMULAI DI SINI ---
         
@@ -353,7 +362,7 @@ if __name__ == '__main__':
                 )
                 
                 post_slug = slugify(final_edited_title)
-                base_target_url_for_permalink = "https://ekstracrot.wordpress.com"
+                base_target_url_for_permalink = "https://wiraferita.wordpress.com"
                 predicted_article_url = f"{base_target_url_for_permalink}/{post_datetime_obj.strftime('%Y')}/{post_datetime_obj.strftime('%m')}/{post_slug}"
                 print(f"🔗 Memprediksi URL artikel target: {predicted_article_url}")
 
@@ -363,10 +372,11 @@ if __name__ == '__main__':
                     article_title=final_edited_title
                 )
                 
+                # PENGGANTIAN TAG dengan <!--more-->
                 final_content_with_more_tag_placeholder = add_more_tag_before_send(content_with_details_tag)
 
                 # ----------------------------------------------------------------
-                # 🚀 LOGIKA KONVERSI HTML YANG DIPERBAIKI (MENGATASI PEMISAHAN KARAKTER) 🚀
+                # 🚀 LOGIKA KONVERSI HTML YANG DIPERBAIKI 🚀
                 # ----------------------------------------------------------------
                 
                 # 1. Memecah konten berdasarkan newline ganda (\n\n) menjadi array blok.
@@ -378,9 +388,9 @@ if __name__ == '__main__':
                     if not block:
                         continue
                         
-                    # Tag khusus yang seharusnya TIDAK dibungkus oleh <p> (termasuk tag details, more, dll.)
-                    # Kita cek jika blok sudah diawali atau diakhiri tag HTML atau merupakan tag khusus.
-                    if block.startswith('<') or block.endswith('>') or block.startswith('Similar wordpress.com site'):
+                    # Tag khusus yang seharusnya TIDAK dibungkus oleh <p> (termasuk tag details, dan sekarang <!--more-->)
+                    # Kita cek jika blok sudah diawali atau diakhiri tag HTML atau merupakan string/tag khusus.
+                    if block.startswith('<') or block.endswith('>') or block.startswith('Similar wordpress.com site') or block == '<!--more-->': # Cek untuk <!--more--> tanpa **
                         final_html_parts.append(block)
                     else:
                         # Ini adalah blok teks biasa, bungkus dengan <p>
@@ -390,6 +400,10 @@ if __name__ == '__main__':
                 final_post_content_html = '\n'.join(final_html_parts)
                 
                 # 3. Pembersihan terakhir: memastikan tag khusus tidak terbungkus oleh tag <p> yang tersisa dari proses gabungan.
+                
+                # Hapus baris penggantian tag <!--more--> -> (sesuai permintaan user)
+                
+                # Pembersihan lainnya
                 final_post_content_html = final_post_content_html.replace('</p>\n\n\n\n<p>', '\n\n')
                 final_post_content_html = final_post_content_html.replace('<p></p>', '')
                 final_post_content_html = final_post_content_html.replace('</p><details>', '</details><details>') # Perbaikan jika ada </p> yang menempel
@@ -404,11 +418,10 @@ if __name__ == '__main__':
                     final_post_content_html = final_post_content_html[3:]
                 if final_post_content_html.endswith('</p>'):
                     final_post_content_html = final_post_content_html[:-4]
-                    
+                        
                 # ----------------------------------------------------------------
                 # 🛑 LOGIKA KONVERSI HTML YANG DIPERBAIKI SELESAI 🛑
                 # ----------------------------------------------------------------
-
 
                 print("💡 Pratinjau Konten HTML Final (untuk cek tag):")
                 # Gunakan replace('\n', ' ') untuk pratinjau agar log tidak terlalu panjang
@@ -450,7 +463,7 @@ if __name__ == '__main__':
         print("\n" + "="*80)
         print(f"🎉 Proses Selesai! **{published_count}** dari {len(unpublished_posts)} artikel baru berhasil diterbitkan ke WordPress TARGET.")
         print("="*80)
-
+        
     except Exception as e:
         print(f"❌ Terjadi kesalahan fatal: {e}")
         import traceback
