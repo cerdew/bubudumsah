@@ -99,8 +99,8 @@ def insert_details_tag(content_text, article_url=None, article_title=None):
     encoded_url = quote_plus(article_url.rstrip('/')) if article_url else ""
     disp_title = article_title.replace('"', '&quot;') if article_title else ""
 
-    details_tag_start = f'<details><summary><a href="https://lanjutbabdua.github.io/lanjut.html?url={encoded_url}#lanjut" rel="nofollow" target="_blank">Lanjut BAB 2: {disp_title}</a></summary><h4>CHAPTER DUA</h4><div id="lanjut">\n'
-    details_tag_end = '\n</div></details><p>Semoga Artikel <strong>{disp_title}</strong> Bisa Menghibur Anda. Terima Kasih Sudah Berkunjung.</p>'
+    details_tag_start = f'<details><summary><a href="#lanjut" rel="nofollow" target="_blank">Lanjut BAB 2: {disp_title}</a></summary><h4>CHAPTER DUA</h4><div id="lanjut">\n'
+    details_tag_end = '\n</div></details>'
     return first_part + '\n\n' + details_tag_start + rest_part + details_tag_end
 
 def add_more_tag_before_send(content_text):
@@ -170,7 +170,7 @@ if __name__ == '__main__':
 
             # URL Prediction
             dt = datetime.datetime.fromisoformat(post_data['date'].replace('Z', '+00:00'))
-            pred_url = f"https://ekstracrot.wordpress.com/{dt.strftime('%Y/%m/%d')}/{slugify(final_title)}"
+            pred_url = f"https://hanyapadamuh.wordpress.com/{dt.strftime('%Y/%m/%d')}/{slugify(final_title)}"
 
             # Format Konten
             content_details = insert_details_tag(content_clean, pred_url, final_title)
