@@ -14,7 +14,6 @@ API_SOURCE_URL = "https://rayuanmalam.com/wp-json/wp/v2/posts"
 # Endpoint REST API untuk WordPress.com
 WP_TARGET_REST_URL = "https://public-api.wordpress.com/wp/v2/sites/hanyapadamuh.wordpress.com/posts"
 STATE_FILE = 'artikel_terbit.json'
-RANDOM_IMAGES_FILE = 'random_images.json'
 DEFAULT_TAGS = ["Cerita Dewasa", "Cerita Seks", "Cerita Sex", "Cerita Ngentot"]
 
 WP_USERNAME = os.getenv('WP_USERNAME')
@@ -72,7 +71,6 @@ def insert_details_tag(content_text, article_url=None, article_title=None):
     
     return "\n\n".join(paragraphs[:idx]) + '\n\n' + details_start + '\n\n' + "\n\n".join(paragraphs[idx:]) + '\n\n' + details_end
 
-# FUNGSI KEMBALI KE SEMULA: Menyisipkan <!--more--> sebagai teks
 def add_more_tag_before_send(content_text):
     paragraphs = [p.strip() for p in content_text.split('\n\n') if p.strip()]
     if not paragraphs: return content_text
@@ -86,7 +84,7 @@ def add_more_tag_before_send(content_text):
     return content_with_more_tag
 
 # --- FUNGSI PUBLISH VIA REST API ---
-def publish_post_to_wordpress_rest(title, content_html, random_image_url=None, post_status='publish', tags=None):
+def publish_post_to_wordpress_rest(title, content_html, post_status='publish', tags=None):
     auth_str = f"{WP_USERNAME}:{WP_APP_PASSWORD}"
     encoded_auth = base64.b64encode(auth_str.encode()).decode()
     
@@ -95,14 +93,9 @@ def publish_post_to_wordpress_rest(title, content_html, random_image_url=None, p
         'Content-Type': 'application/json'
     }
 
-    final_content = content_html
-    if random_image_url:
-        image_html = f'<p><img src="{random_image_url}" alt="{title}" style="max-width: 100%; height: auto; display: block; margin: 0 auto;"></p>'
-        final_content = image_html + "\n\n" + content_html
-
     payload = {
         'title': title,
-        'content': final_content,
+        'content': content_html,
         'status': post_status,
         'slug': slugify(title),
         'tags': tags 
@@ -122,34 +115,52 @@ def publish_post_to_wordpress_rest(title, content_html, random_image_url=None, p
 
 # --- MAIN LOGIC ---
 if __name__ == '__main__':
-    # ... (logika load state dan fetch posts sama seperti sebelumnya) ...
-    # Di dalam loop pemrosesan artikel:
-    
-    # 1. Olah konten dasar
-    content_clean = strip_html_and_divs(remove_anchor_tags(original_content))
-    content_replaced = replace_custom_words(content_clean)
-    final_title = replace_custom_words(original_title)
-    
-    # 2. Sisipkan tag details di tengah
-    content_with_details = insert_details_tag(content_replaced, predicted_url, final_title)
-    
-    # 3. Sisipkan <!--more--> setelah paragraf pertama
-    final_body_text = add_more_tag_before_send(content_with_details)
-    
-    # 4. Konversi ke HTML Paragraphs
-    content_blocks = final_body_text.split('\n\n')
-    final_html_parts = []
-    for block in content_blocks:
-        block = block.strip()
-        if not block: continue
-        
-        # Logika firewall agar <!--more--> atau tag HTML tidak dibungkus <p>
-        if block.startswith('<') or block.endswith('>') or block == '<!--more-->':
-            final_html_parts.append(block)
-        else:
-            final_html_parts.append(f'<p>{block}</p>')
+    # 1. Ambil data dari sumber (RayuanMalam)
+    print("⏳ Mengambil data dari sumber...")
+    try:
+        response = requests.get(API_SOURCE_URL, timeout=20)
+        posts = response.json()
+    except Exception as e:
+        print(f"❌ Gagal mengambil data: {e}")
+        posts = []
 
-    final_post_content_html = '\n'.join(final_html_parts)
-    
-    # 5. Kirim ke WordPress
-    publish_post_to_wordpress_rest(final_title, final_post_content_html, selected_image, tags=DEFAULT_TAGS)
+    # 2. Loop melalui setiap postingan yang didapat
+    for post in posts:
+        # DEFINISI VARIABEL DARI API
+        original_title = post.get('title', {}).get('rendered', 'Tanpa Judul')
+        original_content = post.get('content', {}).get('rendered', '')
+        predicted_url = post.get('link', '')
+        
+        print(f"🔄 Memproses: {original_title}")
+
+        # 3. Olah konten dasar
+        content_clean = strip_html_and_divs(remove_anchor_tags(original_content))
+        content_replaced = replace_custom_words(content_clean)
+        final_title = replace_custom_words(original_title)
+        
+        # 4. Sisipkan tag details di tengah
+        content_with_details = insert_details_tag(content_replaced, predicted_url, final_title)
+        
+        # 5. Sisipkan <!--more--> setelah paragraf pertama
+        final_body_text = add_more_tag_before_send(content_with_details)
+        
+        # 6. Konversi ke HTML Paragraphs
+        content_blocks = final_body_text.split('\n\n')
+        final_html_parts = []
+        for block in content_blocks:
+            block = block.strip()
+            if not block: continue
+            
+            # Agar <!--more--> atau tag HTML tidak dibungkus <p>
+            if block.startswith('<') or block.endswith('>') or block == '<!--more-->':
+                final_html_parts.append(block)
+            else:
+                final_html_parts.append(f'<p>{block}</p>')
+
+        final_post_content_html = '\n'.join(final_html_parts)
+        
+        # 7. Kirim ke WordPress
+        publish_post_to_wordpress_rest(final_title, final_post_content_html, tags=DEFAULT_TAGS)
+        
+        # Jeda 5 detik agar tidak membebani server
+        time.sleep(5)
