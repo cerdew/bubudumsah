@@ -14,7 +14,7 @@ from wordpress_xmlrpc.methods.posts import NewPost
 from wordpress_xmlrpc.methods.media import UploadFile
 
 # --- KONFIGURASI ---
-API_SOURCE_URL = "https://rayuanmalam com/wp-json/wp/v2/posts"
+API_SOURCE_URL = "https://rayuanmalam.com/wp-json/wp/v2/posts"
 WP_TARGET_API_URL = "https://hanyapadamuh.wordpress.com/xmlrpc.php"
 WP_BLOG_ID = "134313143" 
 
