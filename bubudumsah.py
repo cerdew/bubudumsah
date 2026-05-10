@@ -5,16 +5,25 @@ import datetime
 import time
 import random
 import re
+import markdown
 import unicodedata
-import base64
 from urllib.parse import quote_plus
 
+from wordpress_xmlrpc import Client, WordPressPost
+from wordpress_xmlrpc.methods.posts import NewPost
+from wordpress_xmlrpc.methods.media import UploadFile
+
 # --- KONFIGURASI ---
-API_SOURCE_URL = "https://rayuanmalam.com/wp-json/wp/v2/posts"
-# Endpoint REST API untuk WordPress.com
-WP_TARGET_REST_URL = "https://public-api.wordpress.com/wp/v2/sites/hanyapadamuh.wordpress.com/posts"
+API_SOURCE_URL = "https://rayuanmalam com/wp-json/wp/v2/posts"
+WP_TARGET_API_URL = "https://hanyapadamuh.wordpress.com/xmlrpc.php"
+WP_BLOG_ID = "134313143" 
+
 STATE_FILE = 'artikel_terbit.json'
+RANDOM_IMAGES_FILE = 'random_images.json'
 DEFAULT_TAGS = ["Cerita Dewasa", "Cerita Seks", "Cerita Sex", "Cerita Ngentot"]
+
+# Jumlah artikel yang ingin diterbitkan sekali jalan
+MAX_POSTS_PER_RUN = 10 
 
 WP_USERNAME = os.getenv('WP_USERNAME')
 WP_APP_PASSWORD = os.getenv('WP_APP_PASSWORD')
@@ -30,14 +39,14 @@ REPLACEMENT_MAP = {
     "sex": "bercinta"
 }
 
-# --- FUNGSI UTILITY ---
+# --- FUNGSI HELPER (Tetap Sama) ---
 
 def strip_html_and_divs(html):
     if html is None: html = ""
     processed_text = re.sub(r'</p>', r'\n\n', html, flags=re.IGNORECASE)
     processed_text = re.sub(r'<img[^>]*>', '', processed_text)
     processed_text = re.sub(r'</?div[^>]*>', '', processed_text, flags=re.IGNORECASE)
-    processed_text = re.sub(r'<[^>]*>', '', processed_text) 
+    processed_text = re.sub('<[^<]+?>', '', processed_text) 
     processed_text = re.sub(r'\n{3,}', r'\n\n', processed_text).strip()
     return processed_text
 
@@ -58,120 +67,130 @@ def replace_custom_words(text):
         processed_text = pattern.sub(new_word, processed_text)
     return processed_text
 
+def load_published_posts_state():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, 'r') as f:
+            try:
+                data = json.load(f)
+                return set(data) if isinstance(data, list) else set()
+            except: return set()
+    return set()
+
+def save_published_posts_state(published_ids):
+    with open(STATE_FILE, 'w') as f:
+        json.dump(list(published_ids), f)
+
+def load_image_urls(file_path):
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as f:
+            try:
+                urls = json.load(f)
+                return urls if isinstance(urls, list) else []
+            except: return []
+    return []
+
 def insert_details_tag(content_text, article_url=None, article_title=None):
     paragraphs = content_text.split('\n\n')
     if len(paragraphs) < 2: return content_text
     idx = len(paragraphs) // 2 
+    first_part = "\n\n".join(paragraphs[:idx])
+    rest_part = "\n\n".join(paragraphs[idx:])
     
     encoded_url = quote_plus(article_url.rstrip('/')) if article_url else ""
-    enc_title = article_title.replace('"', '&quot;') if article_title else ""
+    disp_title = article_title.replace('"', '&quot;') if article_title else ""
 
-    details_start = f'<details><summary><a href="https://lanjutbabdua.github.io/lanjut.html?url={encoded_url}#lanjut" rel="nofollow" target="_blank">Lanjut BAB 2: {enc_title}</a></summary><h4>CHAPTER DUA</h4><div id="lanjut">'
-    details_end = '</div></details>'
-    
-    return "\n\n".join(paragraphs[:idx]) + '\n\n' + details_start + '\n\n' + "\n\n".join(paragraphs[idx:]) + '\n\n' + details_end
+    details_tag_start = f'<details><summary><a href="https://lanjutbabdua.github.io/lanjut.html?url={encoded_url}#lanjut" rel="nofollow" target="_blank">Lanjut BAB 2: {disp_title}</a></summary><h4>CHAPTER DUA</h4><div id="lanjut">\n'
+    details_tag_end = '\n</div></details><p>Semoga Artikel <strong>{disp_title}</strong> Bisa Menghibur Anda. Terima Kasih Sudah Berkunjung.</p>'
+    return first_part + '\n\n' + details_tag_start + rest_part + details_tag_end
 
 def add_more_tag_before_send(content_text):
-    paragraphs = [p.strip() for p in content_text.split('\n\n') if p.strip()]
-    if not paragraphs: return content_text
-    
-    first_paragraph = paragraphs[0]
-    rest_of_content = "\n\n".join(paragraphs[1:]).strip()
-    
-    # Tetap menggunakan <!--more--> sesuai permintaan
-    content_with_more_tag = first_paragraph + '\n\n' + '<!--more-->' + '\n\n' + rest_of_content
-    print("📝 String <!--more--> disisipkan setelah paragraf pertama.")
-    return content_with_more_tag
+    paragraphs = content_text.split('\n\n')
+    if not paragraphs or not paragraphs[0].strip(): return content_text
+    return paragraphs[0].strip() + '\n\n<!--more-->\n\n' + "\n\n".join(paragraphs[1:]).strip()
 
-# --- FUNGSI PUBLISH VIA REST API ---
-# --- FUNGSI PUBLISH VIA REST API ---
-def publish_post_to_wordpress_rest(title, content_html, post_status='publish', tags=None):
-    auth_str = f"{WP_USERNAME}:{WP_APP_PASSWORD}"
-    encoded_auth = base64.b64encode(auth_str.encode()).decode()
-    
-    headers = {
-        'Authorization': f'Basic {encoded_auth}',
-        'Content-Type': 'application/json'
-    }
-
-    # Payload awal: Kita coba kirim tags sebagai string yang dipisahkan koma
-    # Catatan: Di beberapa versi API, 'tags' mengharuskan ID (angka), bukan teks.
-    payload = {
-        'title': title,
-        'content': content_html,
-        'status': post_status,
-        'slug': slugify(title),
-        'tags': ",".join(tags) if tags else "" 
-    }
-
+def publish_post_to_wordpress(title, content_html, random_image_url=None):
+    if random_image_url:
+        image_html = f'<p><img src="{random_image_url}" alt="{title}" style="max-width: 100%; height: auto; display: block; margin: 0 auto;"></p>'
+        content_html = image_html + "\n\n" + content_html
     try:
-        response = requests.post(WP_TARGET_REST_URL, headers=headers, json=payload, timeout=30)
-        
-        # JIKA GAGAL KARENA TAGS (Error 400), COBA KIRIM ULANG TANPA TAGS
-        if response.status_code == 400 and "tags" in response.text:
-            print("⚠️ Tag ditolak (API minta ID angka). Mengirim ulang tanpa tag...")
-            payload.pop('tags') # Hapus kunci tags dari payload
-            response = requests.post(WP_TARGET_REST_URL, headers=headers, json=payload, timeout=30)
-
-        if response.status_code in [200, 201]:
-            print(f"✅ Artikel '{title}' berhasil diterbitkan!")
-            return response.json()
-        else:
-            print(f"❌ Gagal: {response.status_code} - {response.text}")
-            return None
-            
+        client = Client(WP_TARGET_API_URL, WP_USERNAME, WP_APP_PASSWORD)
+        post = WordPressPost()
+        post.title = title
+        post.content = content_html
+        post.post_status = 'publish'
+        post.slug = slugify(title)
+        post.terms_names = {'post_tag': DEFAULT_TAGS}
+        return client.call(NewPost(post, blog_id=WP_BLOG_ID))
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Kesalahan XML-RPC: {e}")
         return None
 
-# --- MAIN LOGIC ---
+def fetch_raw_posts():
+    all_posts = []
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    for page in range(1, 5): # Ambil sampai 4 halaman untuk cadangan data
+        res = requests.get(API_SOURCE_URL, params={'per_page': 50, 'page': page}, headers=headers)
+        if res.status_code != 200: break
+        batch = res.json()
+        if not batch: break
+        for p in batch:
+            all_posts.append({'id': p['id'], 'title': p['title']['rendered'], 'content': p['content']['rendered'], 'date': p['date']})
+    return all_posts
+
+# --- ALUR UTAMA ---
+
 if __name__ == '__main__':
-    # 1. Ambil data dari sumber (RayuanMalam)
-    print("⏳ Mengambil data dari sumber...")
+    print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Memulai Batch Publish (Target: {MAX_POSTS_PER_RUN} Artikel)")
+
     try:
-        response = requests.get(API_SOURCE_URL, timeout=20)
-        posts = response.json()
-    except Exception as e:
-        print(f"❌ Gagal mengambil data: {e}")
-        posts = []
+        published_ids = load_published_posts_state()
+        random_image_urls = load_image_urls(RANDOM_IMAGES_FILE)
+        all_posts = fetch_raw_posts()
 
-    # 2. Loop melalui setiap postingan yang didapat
-    for post in posts:
-        # DEFINISI VARIABEL DARI API
-        original_title = post.get('title', {}).get('rendered', 'Tanpa Judul')
-        original_content = post.get('content', {}).get('rendered', '')
-        predicted_url = post.get('link', '')
-        
-        print(f"🔄 Memproses: {original_title}")
+        # Filter artikel yang belum pernah diterbitkan
+        unpublished = [p for p in all_posts if str(p['id']) not in published_ids]
+        unpublished.sort(key=lambda x: x['date'], reverse=True)
 
-        # 3. Olah konten dasar
-        content_clean = strip_html_and_divs(remove_anchor_tags(original_content))
-        content_replaced = replace_custom_words(content_clean)
-        final_title = replace_custom_words(original_title)
-        
-        # 4. Sisipkan tag details di tengah
-        content_with_details = insert_details_tag(content_replaced, predicted_url, final_title)
-        
-        # 5. Sisipkan <!--more--> setelah paragraf pertama
-        final_body_text = add_more_tag_before_send(content_with_details)
-        
-        # 6. Konversi ke HTML Paragraphs
-        content_blocks = final_body_text.split('\n\n')
-        final_html_parts = []
-        for block in content_blocks:
-            block = block.strip()
-            if not block: continue
+        if not unpublished:
+            print("🎉 Tidak ada artikel baru.")
+            exit()
+
+        # Ambil maksimal 10 artikel
+        to_publish = unpublished[:MAX_POSTS_PER_RUN]
+        count_success = 0
+
+        for post_data in to_publish:
+            orig_id = str(post_data['id'])
+            orig_title = post_data['title']
             
-            # Agar <!--more--> atau tag HTML tidak dibungkus <p>
-            if block.startswith('<') or block.endswith('>') or block == '<!--more-->':
-                final_html_parts.append(block)
-            else:
-                final_html_parts.append(f'<p>{block}</p>')
+            print(f"🔄 Memproses ({count_success+1}/{len(to_publish)}): {orig_title}")
 
-        final_post_content_html = '\n'.join(final_html_parts)
-        
-        # 7. Kirim ke WordPress
-        publish_post_to_wordpress_rest(final_title, final_post_content_html, tags=DEFAULT_TAGS)
-        
-        # Jeda 5 detik agar tidak membebani server
-        time.sleep(5)
+            final_title = replace_custom_words(orig_title)
+            content_clean = replace_custom_words(strip_html_and_divs(remove_anchor_tags(post_data['content'])))
+
+            # URL Prediction
+            dt = datetime.datetime.fromisoformat(post_data['date'].replace('Z', '+00:00'))
+            pred_url = f"https://ekstracrot.wordpress.com/{dt.strftime('%Y/%m/%d')}/{slugify(final_title)}"
+
+            # Format Konten
+            content_details = insert_details_tag(content_clean, pred_url, final_title)
+            content_final = add_more_tag_before_send(content_details)
+            html_output = '<p>' + content_final.replace('\n\n', '</p><p>') + '</p>'
+
+            # Publish
+            img = random.choice(random_image_urls) if random_image_urls else None
+            res_id = publish_post_to_wordpress(final_title, html_output, img)
+
+            if res_id:
+                published_ids.add(orig_id)
+                count_success += 1
+                print(f"✅ Berhasil! ID: {res_id}")
+                time.sleep(2) # Jeda agar tidak dianggap spam oleh WordPress
+            else:
+                print(f"⚠️ Gagal menerbitkan: {orig_title}")
+
+        save_published_posts_state(published_ids)
+        print(f"\n✨ Selesai! Berhasil menerbitkan {count_success} artikel.")
+
+    except Exception as e:
+        print(f"❌ Error Fatal: {e}")
