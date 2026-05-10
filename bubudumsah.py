@@ -84,6 +84,7 @@ def add_more_tag_before_send(content_text):
     return content_with_more_tag
 
 # --- FUNGSI PUBLISH VIA REST API ---
+# --- FUNGSI PUBLISH VIA REST API ---
 def publish_post_to_wordpress_rest(title, content_html, post_status='publish', tags=None):
     auth_str = f"{WP_USERNAME}:{WP_APP_PASSWORD}"
     encoded_auth = base64.b64encode(auth_str.encode()).decode()
@@ -93,22 +94,32 @@ def publish_post_to_wordpress_rest(title, content_html, post_status='publish', t
         'Content-Type': 'application/json'
     }
 
+    # Payload awal: Kita coba kirim tags sebagai string yang dipisahkan koma
+    # Catatan: Di beberapa versi API, 'tags' mengharuskan ID (angka), bukan teks.
     payload = {
         'title': title,
         'content': content_html,
         'status': post_status,
         'slug': slugify(title),
-        'tags': tags 
+        'tags': ",".join(tags) if tags else "" 
     }
 
     try:
         response = requests.post(WP_TARGET_REST_URL, headers=headers, json=payload, timeout=30)
+        
+        # JIKA GAGAL KARENA TAGS (Error 400), COBA KIRIM ULANG TANPA TAGS
+        if response.status_code == 400 and "tags" in response.text:
+            print("⚠️ Tag ditolak (API minta ID angka). Mengirim ulang tanpa tag...")
+            payload.pop('tags') # Hapus kunci tags dari payload
+            response = requests.post(WP_TARGET_REST_URL, headers=headers, json=payload, timeout=30)
+
         if response.status_code in [200, 201]:
             print(f"✅ Artikel '{title}' berhasil diterbitkan!")
             return response.json()
         else:
             print(f"❌ Gagal: {response.status_code} - {response.text}")
             return None
+            
     except Exception as e:
         print(f"❌ Error: {e}")
         return None
